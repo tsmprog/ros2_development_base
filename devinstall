@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+# Utility script to install the shared development environment for various repositories.
+
+# =======================================================================================
+# General script settings
+# =======================================================================================
+set -e  # Abort on error
+
+DOCKER_CLEAN=true
+if [ $# -gt 0 ]; then
+    DOCKER_ARGS="$1" && shift 1
+    [[ "$1" == "--keep" ]] && DOCKER_CLEAN=false && shift 1
+fi
+
+if [ -n "$DOCKER_ARGS" ]; then
+    DOCKER_ARGS=(--build-arg "$DOCKER_ARGS")
+else
+    DOCKER_ARGS=()
+fi
+
+# Ensure paths relate to repo top-level.
+REPO_PATH="$(git rev-parse --show-toplevel)"
+REPO_NAME="$(basename "$REPO_PATH")"
+cd "$REPO_PATH"
+
+highlight_echo() {
+    printf "==> ✓ %s\n\n" "$1"
+}
+
+echo "Setting up development environment for $REPO_NAME"
+
+
+# =======================================================================================
+# Step 1: Build Docker image
+# =======================================================================================
+echo "Building Docker image for $REPO_NAME..."
+
+DOCKERFILE_PATH="$REPO_PATH/tools/Dockerfile"
+if [ -f "$DOCKERFILE_PATH" ]; then
+    docker build -t "$REPO_NAME" "${DOCKER_ARGS[@]}" -f "$DOCKERFILE_PATH" "$REPO_PATH/tools"
+    highlight_echo "Docker image built successfully with tag $REPO_NAME"
+else
+    echo "Dockerfile not found in $DOCKERFILE_PATH!"
+    exit 1
+fi
+
+
+# Optional: clean up build cache or temp data
+if $DOCKER_CLEAN; then
+    echo "Cleaning up temporary files..."
+    # Add Docker system prune or other cleanup if desired
+fi
+
+highlight_echo "Development environment setup complete."
