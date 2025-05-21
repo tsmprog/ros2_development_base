@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-
-# Utility script to install the shared development environment for various repositories.
-
-# =======================================================================================
-# General script settings
-# =======================================================================================
 set -e  # Abort on error
 
 DOCKER_CLEAN=true
@@ -19,37 +13,71 @@ else
     DOCKER_ARGS=()
 fi
 
-# Ensure paths relate to repo top-level.
-REPO_PATH="$(git rev-parse --show-toplevel)"
-REPO_NAME="$(basename "$REPO_PATH")"
-cd "$REPO_PATH"
+# Subrepo paths
+SUBREPO_PATH="$(git rev-parse --show-toplevel)"
+SUBREPO_NAME="$(basename "$SUBREPO_PATH")"
 
-highlight_echo() {
-    printf "==> ✓ %s\n\n" "$1"
-}
+echo "Setting up development environment for subrepo: $SUBREPO_NAME"
 
-echo "Setting up development environment for $REPO_NAME"
+#Detect parent repo path (one level up)
+PARENT_PATH="$(dirname "$SUBREPO_PATH")"
 
+# Check if parent path is a git repo by looking for .git folder
+if [ -d "$PARENT_PATH/.git" ]; then
+    echo "Detected parent git repo at: $PARENT_PATH"
 
-# =======================================================================================
-# Step 1: Build Docker image
-# =======================================================================================
-echo "Building Docker image for $REPO_NAME..."
+    # Copy pre-commit config to parent repo if it doesn't exist or differs
+    if [ -f "$SUBREPO_PATH/.pre-commit-config.yaml" ]; then
+        echo "Copying .pre-commit-config.yaml to parent repo..."
+        cp "$SUBREPO_PATH/.pre-commit-config.yaml" "$PARENT_PATH/.pre-commit-config.yaml"
+    else
+        echo "Warning: .pre-commit-config.yaml not found in subrepo."
+    fi
 
-DOCKERFILE_PATH="$REPO_PATH/tools/Dockerfile"
-if [ -f "$DOCKERFILE_PATH" ]; then
-    docker build -t "$REPO_NAME" "${DOCKER_ARGS[@]}" -f "$DOCKERFILE_PATH" "$REPO_PATH/tools"
-    highlight_echo "Docker image built successfully with tag $REPO_NAME"
+    # Create .githooks directory and pre-commit script in parent repo
+    GITHOOKS_DIR="$PARENT_PATH/.githooks"
+    mkdir -p "$GITHOOKS_DIR"
+
+    PRE_COMMIT_HOOK="$GITHOOKS_DIR/pre-commit"
+    echo '#!/usr/bin/env bash' > "$PRE_COMMIT_HOOK"
+    echo 'exec pre-commit run --all-files' >> "$PRE_COMMIT_HOOK"
+    chmod +x "$PRE_COMMIT_HOOK"
+    echo "Created pre-commit hook script in parent repo."
+
+    # Install pre-commit in parent repo
+    (
+      cd "$PARENT_PATH"
+      if command -v pre-commit &> /dev/null; then
+          echo "Installing pre-commit hook in parent repo..."
+          pre-commit install --hook-type pre-commit
+      else
+          echo "Warning: pre-commit command not found. Please install pre-commit in your environment."
+      fi
+    )
 else
+    echo "No parent git repo detected. Skipping parent repo pre-commit setup."
+fi
+
+#Build Docker image from subrepo Dockerfile
+echo "Building Docker image for subrepo $SUBREPO_NAME..."
+
+
+DOCKERFILE_PATH="$SUBREPO_PATH/Dockerfile"
+
+if [ ! -f "$DOCKERFILE_PATH" ]; then
     echo "Dockerfile not found in $DOCKERFILE_PATH!"
     exit 1
 fi
 
+echo "Building (or rebuilding) Docker image '$SUBREPO_NAME' with cache..."
 
-# Optional: clean up build cache or temp data
+docker build -t "$SUBREPO_NAME" "${DOCKER_ARGS[@]}" -f "$DOCKERFILE_PATH" "$SUBREPO_PATH"
+
+echo "Docker image '$SUBREPO_NAME' build completed."
+
 if $DOCKER_CLEAN; then
     echo "Cleaning up temporary files..."
-    # Add Docker system prune or other cleanup if desired
+    # Optional: docker system prune or other cleanup here
 fi
 
-highlight_echo "Development environment setup complete."
+echo "Development environment setup complete."
