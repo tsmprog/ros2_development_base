@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Open Docker container prepared for build and test runs in this repository.
+# Note that a container "rrobotics/build-env:<repo-name>" must exist.
+
+usage_and_exit() {
+    echo "Development tools - run command in Docker image" >&2
+    echo "" >&2
+    echo "Usage: $0 [-h] [-v VOLUME:BINDING_NAME] [-w WORKDIR]" >&2
+    echo "-h : shows this message" >&2
+    echo "-v : Specify which volume to mount (instead of the repo root directory) and its binding name." >&2
+    echo "     Format: path/to/directory:binding_name" >&2
+    echo "     Default: Repo root directory and name" >&2
+    echo "-w : Specify in which directory the Docker container should start." >&2
+    echo "     Default: Repo root directory" >&2
+    echo "" >&2
+    echo " Example: $0 -v /home/user:/data -w /data/src ls " >&2
+    exit "$1"
+}
+
+# Abort on error
+set -e
+
+# Run this script from anywhere inside a repository.
+# The entire path below the repo root will be accessible within the docker container.
+REPO_PATH=$(git rev-parse --show-toplevel)
+REPO_NAME=$(basename "$REPO_PATH")
+REPO_CUR_DIR=$(git rev-parse --show-prefix)
+VOLUME="$REPO_PATH:/$REPO_NAME"
+WORKDIR="/$REPO_NAME/$REPO_CUR_DIR"
+
+while getopts ":v:w:r:h" opt; do
+    case $opt in
+        v)
+            VOLUME="$OPTARG"
+            ;;
+        w)
+            WORKDIR="$OPTARG"
+            ;;
+        # Additional arguments for docker run.
+        # Multiple arguments can be added with: ./run -r arg1=x -r arg2=y
+        r)
+            ADDED_DOCKER_RUN_ARGS+=("--$OPTARG")
+            ;;
+        h)
+            usage_and_exit 0
+            ;;
+        \?)
+            echo "Invalid option -$OPTARG" >&2
+            usage_and_exit 1
+            ;;
+    esac
+
+    # If there is no argument delivered to the keyword
+    case $OPTARG in
+        -*)
+            echo "Option $opt needs a valid argument"
+            usage_and_exit 1
+            ;;
+    esac
+done
+
+# Consume all the keyword arguments.
+# The next unprocessed argument will be accessible by $1 afterwards.
+shift $((OPTIND - 1))
+
+if [[ $# = 0 ]]; then
+    # Simply calling this script without parameters opens a terminal inside the image.
+    COMMAND=bash
+else
+    # Otherwise execute the specified command within the image.
+    COMMAND=$1
+
+    # Output of bazel shall not reside within the container such that exiting
+    # and re-opening the container does not lead to long-running re-fetching
+    # of workspace dependencies (e.g. https://mirror.bazel.build/openjdk)
+    OPTIONS=()
+    if [[ "$1" = "bazel" ]]; then
+        OPTIONS+=(--output_user_root=bazel-build)
+    fi
+fi
+
+# Open ...
+# --interactive container --which cleans up itself after closing, ...
+INTERACTIVELY=(--interactive --rm)
+
+# --as user 'builder' which is mapped to local main user (ID 1000) for ...
+#   * easily deleting potential build artifacts and test output outside of the container
+#   * executing tools which are not allowed to be run as root
+AS_LOCAL_USER=(--env "USER=$(id -u)" --user "$(id -u)")
+
+# --with full access to terminal, full GUI (via X server), and other interfaces (USB) ...
+WITH_FULL_ACCESS=(--privileged --tty --network=host --env "DISPLAY=$DISPLAY")
+
+# --with access to the sound system via pulseaudio
+#   Found at https://joonas.fi/2020/12/audio-in-docker-containers-linux-audio-subsystems-spotifyd/
+WITH_SOUND=(--volume "/run/user/$UID/pulse/native:/run/user/$UID/pulse/native"
+    --env "PULSE_SERVER=unix:/run/user/$UID/pulse/native")
+
+# --with reference to this repository ...
+WITH_REPO_REFERENCE=(--volume="$VOLUME" --workdir="$WORKDIR")
+
+# --with access to full file system of host
+WITH_FULL_FILE_SYSTEM=(--volume="$HOME":/host)
+
+# For details: man docker-run
+docker run --name "$REPO_NAME" \
+    "${INTERACTIVELY[@]}" "${AS_LOCAL_USER[@]}" \
+    "${WITH_FULL_ACCESS[@]}" "${WITH_FULL_FILE_SYSTEM[@]}" "${WITH_SOUND[@]}" \
+    "${WITH_REPO_REFERENCE[@]}" \
+    --env ROS_DOMAIN_ID=42 \
+    "${ADDED_DOCKER_RUN_ARGS[@]}" \
+    "$REPO_NAME" "$COMMAND" "${OPTIONS[@]}" "${@:2}" \
+
+
+#--env RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
