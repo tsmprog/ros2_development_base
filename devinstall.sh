@@ -17,12 +17,21 @@ SUBREPO_PATH="$(git rev-parse --show-toplevel)"
 SUBREPO_NAME="$(basename "$SUBREPO_PATH")"
 echo "Setting up development environment for subrepo: $SUBREPO_NAME"
 
-PARENT_PATH="$(dirname "$SUBREPO_PATH")"
+# Attempt to find parent Git repo by walking up
+SEARCH_PATH="$SUBREPO_PATH"
+PARENT_PATH=""
+while [ "$SEARCH_PATH" != "/" ]; do
+    if [ -d "$SEARCH_PATH/.git" ]; then
+        PARENT_PATH="$SEARCH_PATH"
+        break
+    fi
+    SEARCH_PATH="$(dirname "$SEARCH_PATH")"
+done
 
-if [ -d "$PARENT_PATH/.git" ]; then
+if [ -n "$PARENT_PATH" ] && [ "$PARENT_PATH" != "$SUBREPO_PATH" ]; then
     echo "Detected parent git repo at: $PARENT_PATH"
 
-    # Copy pre-commit config if exists
+    # Copy pre-commit config if it exists
     if [ -f "$SUBREPO_PATH/.pre-commit-config.yaml" ]; then
         echo "Copying .pre-commit-config.yaml to parent repo..."
         cp "$SUBREPO_PATH/.pre-commit-config.yaml" "$PARENT_PATH/.pre-commit-config.yaml"
