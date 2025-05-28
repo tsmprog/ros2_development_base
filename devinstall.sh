@@ -24,34 +24,6 @@ fi
 
 echo "Parent repo: $PARENT_PATH"
 
-# Copy pre-commit config if it exists
-if [ -f "$SUBREPO_PATH/.pre-commit-config.yaml" ]; then
-    cp "$SUBREPO_PATH/.pre-commit-config.yaml" "$PARENT_PATH/.pre-commit-config.yaml"
-    echo "✅ Copied .pre-commit-config.yaml"
-fi
-
-# Create .githooks and pre-commit hook
-HOOKS_DIR="$PARENT_PATH/.githooks"
-mkdir -p "$HOOKS_DIR"
-HOOK_FILE="$HOOKS_DIR/pre-commit"
-
-echo '#!/usr/bin/env bash' > "$HOOK_FILE"
-echo 'exec pre-commit run --all-files' >> "$HOOK_FILE"
-chmod +x "$HOOK_FILE"
-echo "✅ Created pre-commit hook in .githooks"
-
-# Configure Git to use .githooks if not already set
-CURRENT_HOOKS_PATH=$(git -C "$PARENT_PATH" config core.hooksPath || echo "")
-if [ "$CURRENT_HOOKS_PATH" != ".githooks" ]; then
-    git -C "$PARENT_PATH" config core.hooksPath .githooks
-    echo "🔧 Set Git hooks path to .githooks"
-fi
-
-# Add .githooks to .gitignore (optional, for dynamic generation)
-if ! grep -q "^.githooks/$" "$PARENT_PATH/.gitignore" 2>/dev/null; then
-    echo ".githooks/" >> "$PARENT_PATH/.gitignore"
-    echo "🧼 Added .githooks/ to .gitignore"
-fi
 
 # Ensure run.sh is executable
 RUN_SCRIPT="$SUBREPO_PATH/run.sh"
